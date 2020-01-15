@@ -5,7 +5,8 @@ import select
 import time
 import traceback
 import threading
-import mcdplugin
+import sys
+import serverinfoparser
 
 stop_flag = 0
 
@@ -59,8 +60,49 @@ class Server(object):
                     print(line)
                     if line[11:].startswith('[Server Shutdown Thread/INFO]: Stopping server') or line[11:].startswith(
                             '[Server thread/INFO]: Stopping server'):
-                        print('El servidor se cerró. Saliendo...')
-                        os._exit(0)
+                        if stop_flag > 0:
+                            print('Plugin called a reboot')
+                        else:
+                            print('El servidor se detuvo. Saliendo...')
+                            sys.exit(0)
+                        stop_flag -= 1
+                    if line[11:].startswith('[Server Watchdog/FATAL]: A single server tick'):
+                        print('single tick took too long for server and watchdog forced the server off', 1)
+                        sys.exit(0)
+                    result = serverinfoparser.parse(line)
+                    if (result.isPlayer == 1) and (result.content == '!!MCDReload'):
+                        try:
+                            self.say('[MCDaemon] :Reloading plugins')
+                            plugins.initPlugins()
+                            plugins_inf = listplugins(plugins)
+                            for singleline in plugins_inf.splitlines():
+                                server.say(singleline)
+                        except:
+                            server.say('error initalizing plugins,check console for detailed information')
+                            print('error initalizing plugins,printing traceback.', traceback.format_exc())
+                    elif (result.isPlayer == 0) and (result.content.endswith('joined the game')):
+                        player = result.content.split(' ')[0]
+                        for singleplugin in plugins.onPlayerJoinPlugins:
+                            try:
+                                t = threading.Thread(target=singleplugin.onPlayerJoin, args=(server, player))
+                                t.setDaemon(True)
+                                t.start()
+                            except:
+                                print('error processing plugin: ' + str(singleplugin), traceback.format_exc())
+                    elif (result.isPlayer == 0) and (result.content.endswith('left the game')):
+                        player = result.content.split(' ')[0]
+                        for singleplugin in plugins.onPlayerLeavePlugins:
+                            try:
+                                t = threading.Thread(target=singleplugin.onPlayerLeave, args=(server, player))
+                                t.setDaemon(True)
+                                t.start()
+                            except:
+                                print('error processing plugin: ' + str(singleplugin), traceback.format_exc())
+                    for singleplugin in plugins.plugins:
+                        t = threading.Thread(target=self.callplugin, args=(result, singleplugin))
+                        t.setDaemon(True)
+                        t.start()
+                time.sleep(1)
         except(KeyboardInterrupt, SystemExit):
             self.stop()
             os._exit(0)
@@ -110,11 +152,32 @@ class Server(object):
 
 
 if __name__ == "__main__":
+    print('Iniciando plugins...')
+    try:
+        import mcdplugin
+
+        plugins = mcdplugin.mcdplugin()
+        plugins_inf = listplugins(plugins)
+        print(plugins_inf)
+
+    except:
+        print('error iniciando plugins :( .', traceback.format_exc())
+        sys.exit(0)
     try:
         server = Server()
     except:
-        print('failed to initalize the server.', 1, traceback.format_exc())
+        print('fallo al inicial el server.', 1, traceback.format_exc())
         os._exit(0)
+
+    for singleplugin in plugins.startupPlugins:
+        try:
+            t = threading.Thread(target=singleplugin.onServerStartup, args=(server,))
+            t.setDaemon(True)
+            t.start()
+        except:
+            print('error initalizing startup plugins,printing traceback.', traceback.format_exc())
+    cmd = threading.Thread(target=getInput, args=(server,))
+
     cmd = threading.Thread(target=getInput, args=(server,))
     cmd.setDaemon(True)
     cmd.start()
