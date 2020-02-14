@@ -10,7 +10,7 @@ tested on Centos7 with python2
 
 ## how to use
 
-1.download the latest [release](https://github.com/kafuuchino-desu/MCDaemon/releases)  
+1.download
 
 2.unzip it and create a shell script named as `start.sh`   
 
